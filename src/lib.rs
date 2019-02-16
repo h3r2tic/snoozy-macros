@@ -158,10 +158,11 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
             #(pub #param_struct_fields,)*
         }
 
-        impl #impl_generics RecipeHash for #name #ty_generics where #where_generics {
-            fn recipe_hash(&self) -> u64 {
-                #generic_types_hash ^
-                #code_hash #(^ calculate_serialized_hash(&self.#recipe_arg_idents))*
+        impl #impl_generics std::hash::Hash for #name #ty_generics where #where_generics {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                #generic_types_hash.hash(state);
+                #code_hash.hash(state);
+                #(calculate_serialized_hash(&self.#recipe_arg_idents, state);)*
             }
         }
 
@@ -174,8 +175,7 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
         }
 
         #fn_visibility fn #name #generics (#(#synth_fn_args,)*) -> SnoozyRef<#output_type> {
-            let op_source_hash: u64 = #generic_types_hash ^ #code_hash;
-            def(#name { #(#main_def_arg_forwards),* }, op_source_hash)
+            def(#name { #(#main_def_arg_forwards),* })
         }
 
         impl #impl_generics Op for #name #ty_generics where #where_generics {
