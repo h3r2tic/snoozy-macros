@@ -162,7 +162,7 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
             fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
                 #generic_types_hash.hash(state);
                 #code_hash.hash(state);
-                #(calculate_serialized_hash(&self.#recipe_arg_idents, state);)*
+                #(whatever_hash(&self.#recipe_arg_idents, state);)*
             }
         }
 
