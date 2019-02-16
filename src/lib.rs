@@ -147,7 +147,7 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
         quote! { 0 }
     } else {
         let types = generics.type_params().map(|p| p.ident.clone());
-        quote! { get_type_hash::<(#(#types),*)>() }
+        quote! { snoozy::get_type_hash::<(#(#types),*)>() }
     };
 
     impl_fn.ident = recipe_op_impl_name.clone();
