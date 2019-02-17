@@ -184,6 +184,10 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
             fn run(&self, ctx: &mut Context) -> Result<#output_type> {
                 #recipe_op_impl_name(ctx, #(&self.#recipe_forward_idents),*)
             }
+
+            fn name() -> &'static str {
+                stringify!(#name)
+            }
         }
 
         impl #impl_generics SnoozyNamedOp for #name #ty_generics where #where_generics {
