@@ -9,6 +9,6 @@ proc-macro = true
 
 [dependencies]
 syn = { version = "0.15.26", features = ["full", "extra-traits", "parsing", "printing"] }
-quote = "*"
-proc-macro2 = "*"
+quote = "0.6"
+proc-macro2 = "0.4"
 twox-hash = "1.1.2"
