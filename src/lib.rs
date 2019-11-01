@@ -175,7 +175,7 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
         }
 
         #fn_visibility fn #name #generics (#(#synth_fn_args,)*) -> SnoozyRef<#output_type> {
-            def(#name { #(#main_def_arg_forwards),* })
+            snoozy_def_binding(#name { #(#main_def_arg_forwards),* })
         }
 
         impl #impl_generics Op for #name #ty_generics where #where_generics {
@@ -187,18 +187,6 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
             fn name() -> &'static str {
                 stringify!(#name)
-            }
-        }
-
-        impl #impl_generics SnoozyNamedOp for #name #ty_generics where #where_generics {
-            type Res = #output_type;
-
-            fn def_named_initial(identity_hash: u64, init_value: Self) -> SnoozyRef<Self::Res> {
-                def_initial(identity_hash, init_value)
-            }
-
-            fn redef_named(identity_hash: u64, new_value: Self) {
-                def_named(identity_hash, new_value);
             }
         }
 
