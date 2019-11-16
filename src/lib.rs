@@ -1,4 +1,4 @@
-#![recursion_limit = "128"]
+#![recursion_limit = "256"]
 
 extern crate proc_macro;
 use proc_macro::TokenStream;
@@ -38,6 +38,7 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
     // Used in the quasi-quotation below as `#name`.
     let name = input.ident.clone();
+    let payload_name = Ident::new(&format!("{}_Payload", name), name.span());
     let fn_visibility = input.vis.clone();
 
     /*let ctx_arg = proc_macro::TokenStream::from(quote! {herpderp: f32});
@@ -154,35 +155,54 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         #[allow(non_camel_case_types)]
-        #fn_visibility struct #name #generics {
+        #fn_visibility struct #payload_name #generics {
             #(pub #param_struct_fields,)*
+        }
+
+        #[allow(non_camel_case_types)]
+        #fn_visibility struct #name #generics {
+            payload: std::sync::Arc<#payload_name #ty_generics>,
         }
 
         impl #impl_generics std::hash::Hash for #name #ty_generics where #where_generics {
             fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
                 #generic_types_hash.hash(state);
                 #code_hash.hash(state);
-                #(whatever_hash(&self.#recipe_arg_idents, state);)*
+                #(whatever_hash(&self.payload.#recipe_arg_idents, state);)*
             }
         }
 
         impl #impl_generics #name #ty_generics where #where_generics {
             #fn_visibility fn new(#(#payload_ctor_args,)*) -> Self {
                 Self {
-                    #(#payload_ctor_forwards),*
+                    payload: std::sync::Arc::new(#payload_name {
+                        #(#payload_ctor_forwards),*
+                    })
                 }
             }
         }
 
         #fn_visibility fn #name #generics (#(#synth_fn_args,)*) -> SnoozyRef<#output_type> {
-            snoozy_def_binding(#name { #(#main_def_arg_forwards),* })
+            snoozy_def_binding(#name {
+                payload: std::sync::Arc::new(#payload_name {
+                    #(#main_def_arg_forwards),*
+                })
+            })
         }
 
         impl #impl_generics Op for #name #ty_generics where #where_generics {
             type Res = #output_type;
 
-            fn run(&self, ctx: &mut Context) -> Result<#output_type> {
-                #recipe_op_impl_name(ctx, #(&self.#recipe_forward_idents),*)
+            //fn run(&self, ctx: &mut Context) -> Future<Result<#output_type>> {
+           //fn run<'a>(&'a self, ctx: &mut Context) -> std::pin::Pin<Box<dyn snoozy::futures::Future<Output = Result<Self::Res>> + Send + 'a>> {
+            fn run<'a>(&'a self, mut ctx: Context) -> std::pin::Pin<Box<dyn snoozy::futures::Future<Output = (Context, Result<Self::Res>)> + Send + 'a>> {
+                use snoozy::futures::future::FutureExt;
+
+                let payload = self.payload.clone();
+                async move {
+                    let res = #recipe_op_impl_name(&mut ctx, #(&payload.#recipe_forward_idents),*).await;
+                    (ctx, res)
+                }.boxed()
             }
 
             fn name() -> &'static str {
