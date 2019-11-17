@@ -65,22 +65,6 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
             // Let's first get through the reference.
             if let Type::Reference(TypeReference { elem: ref ty, .. }) = arg.ty {
                 // Now that we're at the type, get its path (like foo::bar::baz)
-                if let Type::Path(TypePath {
-                    path: Path { ref segments, .. },
-                    ..
-                }) = **ty
-                {
-                    // Finally, check that the last component is "Context"
-                    if let Some(punctuated::Pair::End(PathSegment { ref ident, .. })) =
-                        segments.last()
-                    {
-                        if ident.to_string() == "Context" {
-                            context_arg_found = true;
-                            continue;
-                        }
-                    }
-                }
-
                 recipe_arg_idents.push(ident.clone());
 
                 param_struct_fields.push(Field {
@@ -90,6 +74,19 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
                     colon_token: Some(parse_quote! {:}),
                     ty: (**ty).clone(),
                 });
+            } else if let Type::Path(TypePath {
+                path: Path { ref segments, .. },
+                ..
+            }) = arg.ty
+            {
+                // Finally, check that the last component is "Context"
+                if let Some(punctuated::Pair::End(PathSegment { ref ident, .. })) = segments.last()
+                {
+                    if ident.to_string() == "Context" {
+                        context_arg_found = true;
+                        continue;
+                    }
+                }
             } else {
                 panic!("All arguments to a snoozy function must be references");
             }
@@ -98,7 +95,7 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
     if !context_arg_found {
         panic!(
-            "The first argument to a snoozy function should be &Context. Found: {:?}",
+            "The first argument to a snoozy function should be ctx: Context. Found: {:?}",
             input.decl.inputs[0].clone().into_token_stream().to_string()
         );
     }
@@ -195,13 +192,12 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
             //fn run(&self, ctx: &mut Context) -> Future<Result<#output_type>> {
            //fn run<'a>(&'a self, ctx: &mut Context) -> std::pin::Pin<Box<dyn snoozy::futures::Future<Output = Result<Self::Res>> + Send + 'a>> {
-            fn run<'a>(&'a self, mut ctx: Context) -> std::pin::Pin<Box<dyn snoozy::futures::Future<Output = (Context, Result<Self::Res>)> + Send + 'a>> {
+            fn run<'a>(&'a self, mut ctx: Context) -> std::pin::Pin<Box<dyn snoozy::futures::Future<Output = Result<Self::Res>> + Send + 'a>> {
                 use snoozy::futures::future::FutureExt;
 
                 let payload = self.payload.clone();
                 async move {
-                    let res = #recipe_op_impl_name(&mut ctx, #(&payload.#recipe_forward_idents),*).await;
-                    (ctx, res)
+                    #recipe_op_impl_name(ctx, #(&payload.#recipe_forward_idents),*).await
                 }.boxed()
             }
 
