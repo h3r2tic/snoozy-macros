@@ -1,8 +1,8 @@
 #![recursion_limit = "256"]
 
 extern crate proc_macro;
-use proc_macro::TokenStream;
-use proc_macro2::Span;
+
+use darling::FromMeta;
 use quote::{quote, ToTokens};
 use std::hash::{Hash, Hasher};
 use syn::*;
@@ -14,30 +14,46 @@ fn calculate_hash<T: Hash>(t: &T) -> u64 {
     s.finish()
 }
 
-fn get_first_type_path_segment(ty: &Type) -> Option<&PathSegment> {
+fn get_last_type_path_segment(ty: &Type) -> Option<&PathSegment> {
     if let Type::Path(TypePath {
         path: Path { ref segments, .. },
         ..
     }) = *ty
     {
-        // Finally, check that the last component is "Context"
-        if let Some(punctuated::Pair::End(ps @ PathSegment { .. })) = segments.last() {
-            return Some(&ps);
-        }
+        segments.last()
+    } else {
+        None
     }
+}
 
-    None
+#[derive(Debug, FromMeta)]
+struct MacroArgs {
+    #[darling(default)]
+    cache: bool,
 }
 
 #[proc_macro_attribute]
-pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
+pub fn snoozy(
+    attr: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as ItemFn);
-    let code_hash = LitInt::new(calculate_hash(&input), IntSuffix::U64, Span::call_site());
+    let code_hash = calculate_hash(&input);
+    let code_hash = quote! { #code_hash };
+    //let code_hash = LitInt::new(format!("{}u64", calculate_hash(&input)), Span::call_site());
+
+    let attr_args = parse_macro_input!(attr as AttributeArgs);
+    let attr = match MacroArgs::from_list(&attr_args) {
+        Ok(v) => v,
+        Err(e) => {
+            return e.write_errors().into();
+        }
+    };
 
     let mut impl_fn = input.clone();
 
     // Used in the quasi-quotation below as `#name`.
-    let name = input.ident.clone();
+    let name = input.sig.ident.clone();
     let payload_name = Ident::new(&format!("{}_Payload", name), name.span());
     let fn_visibility = input.vis.clone();
 
@@ -46,16 +62,16 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
         .decl
         .inputs
         .insert(0, parse_macro_input!(ctx_arg as FnArg));*/
-    //input.decl.inputs.insert(0, parse_quote! {herpderp: f32});
+    //input.sig.inputs.insert(0, parse_quote! {herpderp: f32});
 
     let mut param_struct_fields: Vec<Field> = vec![];
 
     let mut context_arg_found = false;
     let mut recipe_arg_idents = Vec::new();
 
-    for arg in input.decl.inputs.iter() {
-        if let FnArg::Captured(ref arg) = arg {
-            let ident = if let Pat::Ident(ref ident) = arg.pat {
+    for arg in input.sig.inputs.iter() {
+        if let FnArg::Typed(ref arg) = arg {
+            let ident = if let Pat::Ident(ref ident) = *arg.pat {
                 ident.ident.clone()
             } else {
                 panic!("onoz, non-ident fn arg");
@@ -63,7 +79,7 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
             // The first parameter should be a mutable reference to a snoozy Context struct
             // Let's first get through the reference.
-            if let Type::Reference(TypeReference { elem: ref ty, .. }) = arg.ty {
+            if let Type::Reference(TypeReference { elem: ref ty, .. }) = *arg.ty {
                 // Now that we're at the type, get its path (like foo::bar::baz)
                 recipe_arg_idents.push(ident.clone());
 
@@ -77,11 +93,10 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
             } else if let Type::Path(TypePath {
                 path: Path { ref segments, .. },
                 ..
-            }) = arg.ty
+            }) = *arg.ty
             {
                 // Finally, check that the last component is "Context"
-                if let Some(punctuated::Pair::End(PathSegment { ref ident, .. })) = segments.last()
-                {
+                if let Some(PathSegment { ref ident, .. }) = segments.last() {
                     if ident.to_string() == "Context" {
                         context_arg_found = true;
                         continue;
@@ -96,13 +111,13 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
     if !context_arg_found {
         panic!(
             "The first argument to a snoozy function should be ctx: Context. Found: {:?}",
-            input.decl.inputs[0].clone().into_token_stream().to_string()
+            input.sig.inputs[0].clone().into_token_stream().to_string()
         );
     }
 
-    let generics = input.decl.generics;
-    let output_type: Type = if let ReturnType::Type(_, ref ty) = &input.decl.output {
-        if let Some(ret_type) = get_first_type_path_segment(ty) {
+    let generics = input.sig.generics;
+    let output_type: Type = if let ReturnType::Type(_, ref ty) = &input.sig.output {
+        if let Some(ret_type) = get_last_type_path_segment(ty) {
             if ret_type.ident.to_string() != "Result" {
                 panic!("The return type of snoozy functions must be Result<_>");
             }
@@ -111,10 +126,8 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
                 ref args, ..
             }) = ret_type.arguments
             {
-                if let GenericArgument::Type(ty) = args
-                    .first()
-                    .expect("getting the type parameter of Result")
-                    .value()
+                if let GenericArgument::Type(ty) =
+                    args.first().expect("getting the type parameter of Result")
                 {
                     ty.clone()
                 } else {
@@ -148,7 +161,8 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
         quote! { snoozy::get_type_hash::<(#(#types),*)>() }
     };
 
-    impl_fn.ident = recipe_op_impl_name.clone();
+    impl_fn.sig.ident = recipe_op_impl_name.clone();
+    let should_cache_result = attr.cache;
 
     let expanded = quote! {
         #[allow(non_camel_case_types)]
@@ -203,6 +217,10 @@ pub fn snoozy(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
             fn name() -> &'static str {
                 stringify!(#name)
+            }
+
+            fn should_cache_result(&self) -> bool {
+                #should_cache_result
             }
         }
 
