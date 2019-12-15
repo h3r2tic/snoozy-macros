@@ -35,8 +35,9 @@ struct MacroArgs {
 #[proc_macro_attribute]
 pub fn snoozy(
     attr: proc_macro::TokenStream,
-    input: proc_macro::TokenStream,
+    mut input_tokens: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
+    let input = input_tokens.clone();
     let input = parse_macro_input!(input as ItemFn);
     let code_hash = calculate_hash(&input);
     let code_hash = quote! { #code_hash };
@@ -53,7 +54,29 @@ pub fn snoozy(
     let mut impl_fn = input.clone();
 
     // Used in the quasi-quotation below as `#name`.
-    let name = input.sig.ident.clone();
+    let impl_fn_name = input.sig.ident.clone();
+    let impl_fn_name_str = impl_fn_name.to_string();
+
+    // The implementation function contains a suffix which we strip for the user-facing function
+    // This is necessary to get correct line numbers for errors while https://github.com/rust-lang/rust/issues/43081 is unresolved.
+    let name = Ident::new(
+        {
+            let name = &impl_fn_name_str;
+            let suffix = "_snoozy";
+            let suffix_len = suffix.len();
+            assert!(
+                name.len() > suffix_len,
+                "Function name must contain a '_snoozy' suffix"
+            );
+            assert!(
+                &name[name.len() - suffix_len..] == suffix,
+                "Function name must contain a '_snoozy' suffix"
+            );
+            &name[..name.len() - suffix_len]
+        },
+        impl_fn_name.span(),
+    );
+
     let payload_name = Ident::new(&format!("{}_Payload", name), name.span());
     let fn_visibility = input.vis.clone();
 
@@ -211,7 +234,7 @@ pub fn snoozy(
 
                 let payload = self.payload.clone();
                 async move {
-                    #recipe_op_impl_name(ctx, #(&payload.#recipe_forward_idents),*).await
+                    #impl_fn_name(ctx, #(&payload.#recipe_forward_idents),*).await
                 }.boxed()
             }
 
@@ -223,9 +246,29 @@ pub fn snoozy(
                 #should_cache_result
             }
         }
-
-        #impl_fn
     };
 
-    proc_macro::TokenStream::from(expanded)
+    input_tokens.extend(proc_macro::TokenStream::from(expanded));
+
+    /*let mut result = proc_macro::TokenStream::from(expanded);
+    let mut module_inner: proc_macro::TokenStream = quote! { use super::*; }.into();
+    //let impl_fn = impl_fn.into_token_stream();
+    //let impl_fn: proc_macro::TokenStream = impl_fn.into();
+    let impl_module = {
+        use core::iter::FromIterator;
+        use proc_macro::*;
+
+        //panic!(format!(module_inner));
+        module_inner.extend(input_tokens);
+
+        let impl_module: Vec<TokenTree> = vec![
+            TokenTree::Ident(Ident::new("mod", Span::call_site())),
+            TokenTree::Ident(Ident::new(&impl_mod_name, Span::call_site())),
+            TokenTree::Group(Group::new(Delimiter::Brace, module_inner)),
+        ];
+        TokenStream::from_iter(impl_module.into_iter())
+    };*/
+
+    //result.extend(impl_module);
+    input_tokens
 }
